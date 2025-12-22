@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -28,12 +29,12 @@ namespace Pulsar.Server.Plugins
         {
             try
             {
-                if (!Directory.Exists(folder)) 
+                if (!Directory.Exists(folder))
                 {
                     Directory.CreateDirectory(folder);
                     _context.Log("Created plugin directory: " + folder);
                 }
-                
+
                 var enabledDlls = Directory.EnumerateFiles(folder, "*.dll", SearchOption.TopDirectoryOnly)
                     .Where(f => !f.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
                     .Where(f => !IsClientPluginFile(f))
@@ -41,7 +42,7 @@ namespace Pulsar.Server.Plugins
                     .ToList();
 
                 _context.Log($"Found {enabledDlls.Count} enabled DLL files in: {folder}");
-                
+
                 foreach (var dll in enabledDlls)
                 {
                     _context.Log("Attempting to load: " + Path.GetFileName(dll));
@@ -87,7 +88,7 @@ namespace Pulsar.Server.Plugins
                 return;
             }
             _context.Log($"File {e.ChangeType}: {e.Name}");
-            Task.Delay(500).ContinueWith(_ => 
+            Task.Delay(500).ContinueWith(_ =>
             {
                 try
                 {
@@ -108,7 +109,7 @@ namespace Pulsar.Server.Plugins
                 return;
             }
             _context.Log($"File renamed: {e.OldName} -> {e.Name}");
-            Task.Delay(500).ContinueWith(_ => 
+            Task.Delay(500).ContinueWith(_ =>
             {
                 try
                 {
@@ -151,7 +152,7 @@ namespace Pulsar.Server.Plugins
                         _context.Log("Plugin directory does not exist: " + folder);
                         return;
                     }
-                    
+
                     var enabledDlls = Directory.EnumerateFiles(folder, "*.dll", SearchOption.TopDirectoryOnly)
                         .Where(f => !f.EndsWith(".disabled", StringComparison.OrdinalIgnoreCase))
                         .Where(f => !IsClientPluginFile(f))
@@ -163,7 +164,7 @@ namespace Pulsar.Server.Plugins
                     var newPlugins = new List<string>();
                     var removedPlugins = new List<string>();
 
-                    var pluginsToRemove = _plugins.Where(p => 
+                    var pluginsToRemove = _plugins.Where(p =>
                     {
                         var dllName = p.GetType().Assembly.GetName().Name + ".dll";
                         return !currentDllNames.Contains(dllName);
@@ -172,13 +173,13 @@ namespace Pulsar.Server.Plugins
                     foreach (var plugin in pluginsToRemove)
                     {
                         removedPlugins.Add(plugin.Name);
-                        
+
                         if (plugin is IUIExtensionPlugin uiPlugin)
                         {
                             UIExtensionManager.UnregisterUIExtension(uiPlugin);
                             _context.Log("Unregistered UI extension: " + plugin.Name);
                         }
-                        
+
                         _plugins.Remove(plugin);
                         _context.Log($"Plugin removed: {plugin.Name}");
                     }
@@ -195,14 +196,14 @@ namespace Pulsar.Server.Plugins
                     if (newPlugins.Count > 0 || removedPlugins.Count > 0)
                     {
                         var changes = new List<string>();
-                        
+
                         if (newPlugins.Count > 0)
                         {
                             var pluginList = string.Join(", ", newPlugins.Take(5));
                             var moreText = newPlugins.Count > 5 ? $" and {newPlugins.Count - 5} more" : "";
                             changes.Add($"Added {newPlugins.Count} plugin{(newPlugins.Count > 1 ? "s" : "")}: {pluginList}{moreText}");
                         }
-                        
+
                         if (removedPlugins.Count > 0)
                         {
                             var removedList = string.Join(", ", removedPlugins.Take(5));
@@ -216,7 +217,7 @@ namespace Pulsar.Server.Plugins
                     {
                         _context.Log($"Plugin scan complete: {_plugins.Count} plugins loaded");
                     }
-                    
+
                     PluginsChanged?.Invoke(this, EventArgs.Empty);
                 }
                 catch (Exception ex)
@@ -227,7 +228,7 @@ namespace Pulsar.Server.Plugins
             }
         }
 
-        private string TryLoadDll(string path)
+        /*private string TryLoadDll(string path)
         {
             try
             {
@@ -241,6 +242,7 @@ namespace Pulsar.Server.Plugins
                 var alreadyLoaded = _plugins.Any(p => 
                 {
                     var loadedDllName = p.GetType().Assembly.GetName().Name + ".dll";
+                    _context.Log(loadedDllName);
                     return string.Equals(loadedDllName, dllName, StringComparison.OrdinalIgnoreCase);
                 });
 
@@ -254,11 +256,15 @@ namespace Pulsar.Server.Plugins
                 string loadedPlugin = null;
                 foreach (var t in types)
                 {
+                    _context.Log($"type name of assembly ({asm.FullName}):" + t.FullName);
+                    _context.Log($"Path: {path}");
                     var pluginName = TryInit(t, Path.GetFileName(path));
                     if (!string.IsNullOrEmpty(pluginName))
                         loadedPlugin = pluginName;
                 }
                 return loadedPlugin;
+
+
             }
             catch (ReflectionTypeLoadException rtle)
             {
@@ -271,7 +277,88 @@ namespace Pulsar.Server.Plugins
                 _context.Log("Plugin load error: " + ex.Message);
             }
             return null;
+        }*/
+
+        private string TryLoadDll(string path)
+        {
+            if (IsClientPluginFile(path))
+            {
+                _context.Log($"Skipping client plugin assembly for server load: {Path.GetFileName(path)}");
+                return null;
+            }
+
+            AssemblyLoadContext loadContext = new AssemblyLoadContext("PluginLoadContext", true);
+            AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve; // Resolves assemblies for the dll that is being loaded
+
+            var dllName = Path.GetFileName(path);
+            var alreadyLoaded = _plugins.Any(p =>
+            {
+                var loadedDllName = p.GetType().Assembly.GetName().Name + ".dll";
+                _context.Log(loadedDllName);
+                return string.Equals(loadedDllName, dllName, StringComparison.OrdinalIgnoreCase);
+            });
+
+            if (alreadyLoaded)
+            {
+                return null;
+            }
+
+            try
+            {
+                using MemoryStream executableStream = new(File.ReadAllBytes(path));
+
+                // Load the assembly from the memory stream
+                Assembly assembly = loadContext.LoadFromStream(executableStream);
+
+                // Retrieve types that implement IServerPlugin
+                var types = assembly.GetTypes().Where(t => !t.IsAbstract && typeof(IServerPlugin).IsAssignableFrom(t));
+
+                string loadedPlugin = null;
+                foreach (var t in types)
+                {
+                    _context.Log($"Initiating following type: {t.FullName}");
+                    var pluginName = TryInit(t, Path.GetFileName(path));
+                    if (!string.IsNullOrEmpty(pluginName))
+                        loadedPlugin = pluginName;
+                }
+
+                return loadedPlugin;
+            }
+            catch (ReflectionTypeLoadException rtle)
+            {
+                _context.Log("Plugin load error (ReflectionTypeLoadException): " + rtle.Message);
+                foreach (var e in rtle.LoaderExceptions)
+                    _context.Log("  " + e?.Message);
+            }
+            catch (FileNotFoundException fnfe)
+            {
+                _context.Log($"File not found: {fnfe.Message}");
+            }
+            catch (Exception ex)
+            {
+                _context.Log("Plugin load error: " + ex.Message);
+            }
+            finally
+            {
+                AppDomain.CurrentDomain.AssemblyResolve -= OnAssemblyResolve; // Remove the event handler
+            }
+
+            return null;
         }
+
+        private Assembly OnAssemblyResolve(object sender, ResolveEventArgs args)
+        {
+            // Attempt to resolve the assembly from the same directory as the plugin
+            var assemblyPath = Path.Combine(Path.GetDirectoryName(args.Name), $"{new AssemblyName(args.Name).Name}.dll");
+            if (File.Exists(assemblyPath))
+            {
+                return Assembly.LoadFrom(assemblyPath);
+            }
+
+            return null; // Unable to resolve
+        }
+
+
 
         private string TryInit(Type t, string source)
         {
@@ -282,15 +369,15 @@ namespace Pulsar.Server.Plugins
                     p.Initialize(_context);
                     _plugins.Add(p);
                     _context.Log("Loaded plugin '" + p.Name + "' " + p.Version + " from " + source);
-                    
+
                     if (p is IUIExtensionPlugin uiPlugin)
                     {
                         UIExtensionManager.RegisterUIExtension(uiPlugin);
                         _context.Log("Registered UI extension: " + p.Name);
                     }
-                    
+
                     PluginsChanged?.Invoke(this, EventArgs.Empty);
-                    
+
                     return p.Name;
                 }
             }
