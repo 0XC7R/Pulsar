@@ -421,6 +421,9 @@ namespace Pulsar.Server.Plugins
             // Fallback logic remains the same
             var dependsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Depends");
             var fallbackPath = Path.Combine(fallbackPath, $"{assemblyName}.dll");
+
+            if (!Directory.Exists(dependsPath)) Directory.CreateDirectory(dependsPath);
+            
             if (File.Exists(fallbackPath))
             {
                 return Assembly.LoadFrom(fallbackPath);
