@@ -10,6 +10,7 @@ namespace Pulsar.Server.Plugins
     {
         Form MainForm { get; }
         PulsarServer Server { get; }
+        void Log(string message, bool e = false); // error log or not, will default to false but can be set to true for error and red text.
         void Log(string message);
         void AddClientContextMenuItem(string text, Action<IReadOnlyList<Client>> onClick);
         void AddClientContextMenuItem(string text, Icon icon, Action<IReadOnlyList<Client>> onClick);
