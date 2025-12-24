@@ -8,6 +8,7 @@ using System.Runtime.Loader;
 using System.Threading;
 using System.Threading.Tasks;
 
+
 namespace Pulsar.Server.Plugins
 {
     public sealed class PluginManager : IDisposable
@@ -340,23 +341,96 @@ namespace Pulsar.Server.Plugins
             }
             finally
             {
+
                 AppDomain.CurrentDomain.AssemblyResolve -= OnAssemblyResolve; // Remove the event handler
             }
 
             return null;
         }
 
+
         private Assembly OnAssemblyResolve(object sender, ResolveEventArgs args)
         {
-            // Attempt to resolve the assembly from the same directory as the plugin
-            var assemblyPath = Path.Combine(Path.GetDirectoryName(args.Name), $"{new AssemblyName(args.Name).Name}.dll");
-            if (File.Exists(assemblyPath))
+            var assemblyName = new AssemblyName(args.Name).Name;
+
+            try
             {
-                return Assembly.LoadFrom(assemblyPath);
+                var loadingPluginAssembly = args.RequestingAssembly;
+                var resources = loadingPluginAssembly.GetManifestResourceNames();
+
+                // Log available resources
+                //_context.Log($"Available resources in assembly '{loadingPluginAssembly.FullName}': {string.Join(", ", resources)}");
+
+                // Find resources that match the assembly name by extracting the base name
+                // We only look for DLLs here, we are currently ignoring anything todo with .g.resource/resource/non .dlls
+                var nameFormatted = resources
+                    .FirstOrDefault(resource =>
+                    {
+                        var baseName = resource.Replace(".dll.compressed", "").Replace("costura.", "");
+                        // debugging var eq = baseName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase);
+                        // Check if the base name matches the assembly name
+                        return baseName.Equals(assemblyName.Replace(".dll.compressed", "").Replace("costura.", ""),
+                            StringComparison.OrdinalIgnoreCase) || baseName == assemblyName; // dont need the || but i think just incase however could remove incase of .resource
+                    });
+
+                // usually embeded resources like dlls (cosutra.dllname.dll.compressed) starts with costura but others like .
+                if (nameFormatted != null && nameFormatted.StartsWith("costura"))
+                {
+                    _context.Log($"Found matching resource: {nameFormatted}"); // costura.pooroot.dll.compressed
+                    _context.Log($"Invoking LoadStream with: {nameFormatted}");
+
+                    // Finds the assembly loader class from namespace costura then look for Loadstream method which is private static and takes a string as argument
+                    var costuraAssemblyLoaderType = loadingPluginAssembly.GetType("Costura.AssemblyLoader");
+                    var loadStreamMethod = costuraAssemblyLoaderType.GetMethod(
+                        "LoadStream",
+                        BindingFlags.NonPublic | BindingFlags.Static,
+                        null,
+                        new Type[] { typeof(string) },
+                        null
+                    );
+
+                    // Invoke LoadStream to get the assembly stream
+                    var assemblyStream = (Stream)loadStreamMethod.Invoke(null, new object[] { nameFormatted });
+
+                    if (assemblyStream == null)
+                    {
+                        _context.Log($"Failed to load stream for assembly: {nameFormatted}");
+                        return null;
+                    }
+
+                    using (var memoryStream = new MemoryStream())
+                    {
+                        assemblyStream.CopyTo(memoryStream);
+                        return Assembly.Load(memoryStream.ToArray()); // load dll in assembly
+                    }
+                }
+                else
+                {
+                    _context.Log($"No matching resource found for assembly: {assemblyName}");
+                }
+            }
+            catch (TargetInvocationException tie)
+            {
+                _context.Log($"Target invocation exception: {tie.InnerException?.Message}");
+            }
+            catch (Exception ex)
+            {
+                _context.Log($"Error resolving assembly '{assemblyName}': {ex.Message}");
             }
 
-            return null; // Unable to resolve
+            // Fallback logic remains the same
+            var dependsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Depends");
+            var fallbackPath = Path.Combine(fallbackPath, $"{assemblyName}.dll");
+            if (File.Exists(fallbackPath))
+            {
+                return Assembly.LoadFrom(fallbackPath);
+            }
+
+            _context.Log($"Unable to resolve assembly: {assemblyName}");
+            return null;
         }
+
+
 
 
 
