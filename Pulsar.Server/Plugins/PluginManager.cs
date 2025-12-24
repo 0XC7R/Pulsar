@@ -373,8 +373,8 @@ namespace Pulsar.Server.Plugins
                             StringComparison.OrdinalIgnoreCase) || baseName == assemblyName; // dont need the || but i think just incase however could remove incase of .resource
                     });
 
-                // usually embeded resources like dlls (cosutra.dllname.dll.compressed) starts with costura but others like .
-                if (nameFormatted != null && nameFormatted.StartsWith("costura"))
+                // usually embeded resources like dlls (cosutra.dllname.dll.compressed) starts with costura but others like .resource or .g.resource do not
+                if (!string.IsNullOrEmpty(nameFormatted) && nameFormatted.StartsWith("costura"))
                 {
                     _context.Log($"Found matching resource: {nameFormatted}"); // costura.pooroot.dll.compressed
                     _context.Log($"Invoking LoadStream with: {nameFormatted}");
