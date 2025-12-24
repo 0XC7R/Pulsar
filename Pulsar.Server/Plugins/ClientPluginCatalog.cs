@@ -106,7 +106,7 @@ namespace Pulsar.Server.Plugins
 
                 if (!seenIds.Add(descriptor.PluginId))
                 {
-                    _context?.Log($"Duplicate client plugin id '{descriptor.PluginId}' detected in '{Path.GetFileName(file)}'; skipping duplicate.");
+                    _context?.Log($"Duplicate client plugin id '{descriptor.PluginId}' detected in '{Path.GetFileName(file)}'; skipping duplicate.", true);
                     continue;
                 }
 
@@ -140,13 +140,13 @@ namespace Pulsar.Server.Plugins
 
                 if (pluginType == null)
                 {
-                    _context?.Log($"Client plugin '{Path.GetFileName(path)}' does not expose an IUniversalPlugin implementation.");
+                    _context?.Log($"Client plugin '{Path.GetFileName(path)}' does not expose an IUniversalPlugin implementation.", true);
                     return null;
                 }
 
                 if (Activator.CreateInstance(pluginType) is not IUniversalPlugin pluginInstance)
                 {
-                    _context?.Log($"Client plugin '{Path.GetFileName(path)}' could not be instantiated.");
+                    _context?.Log($"Client plugin '{Path.GetFileName(path)}' could not be instantiated.", true);
                     return null;
                 }
 
@@ -174,18 +174,18 @@ namespace Pulsar.Server.Plugins
             }
             catch (ReflectionTypeLoadException rtle)
             {
-                _context?.Log($"Client plugin load error ({Path.GetFileName(path)}): {rtle.Message}");
+                _context?.Log($"Client plugin load error ({Path.GetFileName(path)}): {rtle.Message}", true);
                 foreach (var exception in rtle.LoaderExceptions)
                 {
                     if (!string.IsNullOrWhiteSpace(exception?.Message))
                     {
-                        _context?.Log("  " + exception.Message);
+                        _context?.Log("  " + exception.Message, true);
                     }
                 }
             }
             catch (Exception ex)
             {
-                _context?.Log($"Client plugin load error ({Path.GetFileName(path)}): {ex.Message}");
+                _context?.Log($"Client plugin load error ({Path.GetFileName(path)}): {ex.Message}", true);
             }
             finally
             {
@@ -208,23 +208,24 @@ namespace Pulsar.Server.Plugins
                 //_context.Log($"Available resources in assembly '{loadingPluginAssembly.FullName}': {string.Join(", ", resources)}");
 
                 // Find resources that match the assembly name by extracting the base name
+                // We only look for DLLs here, we are currently ignoring anything todo with .g.resource/resource/non .dlls
                 var nameFormatted = resources
                     .FirstOrDefault(resource =>
                     {
-                        
                         var baseName = resource.Replace(".dll.compressed", "").Replace("costura.", "");
-                        //debug var var eq = baseName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase);
+                        // debugging var eq = baseName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase);
                         // Check if the base name matches the assembly name
                         return baseName.Equals(assemblyName.Replace(".dll.compressed", "").Replace("costura.", ""),
-                            StringComparison.OrdinalIgnoreCase) || baseName == assemblyName;
+                            StringComparison.OrdinalIgnoreCase) || baseName == assemblyName; // dont need the || but i think just incase however could remove incase of .resource
                     });
 
                 // usually embeded resources like dlls (cosutra.dllname.dll.compressed) starts with costura but others like .resource or .g.resource do not
                 if (!string.IsNullOrEmpty(nameFormatted) && nameFormatted.StartsWith("costura"))
                 {
-                    _context.Log($"Found matching resource: {nameFormatted}");
+                    _context.Log($"Found matching resource: {nameFormatted}"); // costura.pooroot.dll.compressed
                     _context.Log($"Invoking LoadStream with: {nameFormatted}");
 
+                    // Finds the assembly loader class from namespace costura then look for Loadstream method which is private static and takes a string as argument
                     var costuraAssemblyLoaderType = loadingPluginAssembly.GetType("Costura.AssemblyLoader");
                     var loadStreamMethod = costuraAssemblyLoaderType.GetMethod(
                         "LoadStream",
@@ -239,31 +240,29 @@ namespace Pulsar.Server.Plugins
 
                     if (assemblyStream == null)
                     {
-                        _context.Log($"Failed to load stream for assembly: {nameFormatted}");
+                        _context.Log($"Failed to load stream for assembly: {nameFormatted}", true);
                         return null;
                     }
 
                     using (var memoryStream = new MemoryStream())
                     {
                         assemblyStream.CopyTo(memoryStream);
-                        return Assembly.Load(memoryStream.ToArray());
+                        return Assembly.Load(memoryStream.ToArray()); // load dll in assembly
                     }
                 }
                 else
                 {
-                    _context.Log($"No matching resource found for assembly: {assemblyName}");
+                    _context.Log($"No matching resource found for assembly: {assemblyName}", true);
                 }
             }
             catch (TargetInvocationException tie)
             {
-                _context.Log($"Target invocation exception: {tie.InnerException?.Message}");
+                _context.Log($"Target invocation exception: {tie.InnerException?.Message}", true);
             }
             catch (Exception ex)
             {
-                _context.Log($"Error resolving assembly '{assemblyName}': {ex.Message}");
+                _context.Log($"Error resolving assembly '{assemblyName}': {ex.Message}", true);
             }
-
-            
 
             var dependsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Depends");
             var fallbackPath = Path.Combine(dependsPath, $"{assemblyName}.dll");
@@ -275,9 +274,10 @@ namespace Pulsar.Server.Plugins
                 return Assembly.LoadFrom(fallbackPath);
             }
 
-            _context.Log($"Unable to resolve assembly: {assemblyName}");
+            _context.Log($"Unable to resolve assembly: {assemblyName}", true);
             return null;
         }
+
 
 
         private void StartWatcher()
