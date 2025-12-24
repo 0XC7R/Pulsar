@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Loader;
 using System.Threading.Tasks;
 
 namespace Pulsar.Server.Plugins
@@ -118,6 +119,9 @@ namespace Pulsar.Server.Plugins
 
         private ClientPluginDescriptor TryLoad(string path)
         {
+            AssemblyLoadContext loadContext = new AssemblyLoadContext("ClientPluginLoadContext", true);
+            AppDomain.CurrentDomain.AssemblyResolve += OnAssemblyResolve;
+
             try
             {
                 if (!IsClientPluginFile(path))
@@ -125,8 +129,12 @@ namespace Pulsar.Server.Plugins
                     return null;
                 }
 
-                var bytes = File.ReadAllBytes(path);
-                var asm = Assembly.Load(bytes);
+                
+                using MemoryStream executableStream = new(File.ReadAllBytes(path));
+                var bytes = executableStream.ToArray();
+                // Load the assembly from the memory stream
+                var asm = loadContext.LoadFromStream(executableStream);
+
                 var pluginType = asm.GetTypes()
                     .FirstOrDefault(t => typeof(IUniversalPlugin).IsAssignableFrom(t) && !t.IsAbstract);
 
@@ -179,9 +187,99 @@ namespace Pulsar.Server.Plugins
             {
                 _context?.Log($"Client plugin load error ({Path.GetFileName(path)}): {ex.Message}");
             }
+            finally
+            {
+                AppDomain.CurrentDomain.AssemblyResolve -= OnAssemblyResolve; // Clean up event subscription
+            }
 
             return null;
         }
+
+        private Assembly OnAssemblyResolve(object sender, ResolveEventArgs args)
+        {
+            var assemblyName = new AssemblyName(args.Name).Name;
+
+            try
+            {
+                var loadingPluginAssembly = args.RequestingAssembly;
+                var resources = loadingPluginAssembly.GetManifestResourceNames();
+
+                // Log available resources
+                _context.Log($"Available resources in assembly '{loadingPluginAssembly.FullName}': {string.Join(", ", resources)}");
+
+                // Find resources that match the assembly name by extracting the base name
+                var nameFormatted = resources
+                    .FirstOrDefault(resource =>
+                    {
+                        // Extract the base name before .g.resources or .resources
+                        // .Replace(".g.resources", "").Replace(".resources", "").
+                        var baseName = resource.Replace(".dll.compressed", "").Replace("costura.", "");
+                        var eq = baseName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase);
+                        // Check if the base name matches the assembly name
+                        return baseName.Equals(assemblyName.Replace(".dll.compressed", "").Replace("costura.", ""),
+                            StringComparison.OrdinalIgnoreCase) || baseName == assemblyName;
+                    });
+
+                // usually embeded resources like dlls (cosutra.dllname.dll.compressed) starts with costura but others like .
+                if (nameFormatted != null && nameFormatted.StartsWith("costura"))
+                {
+                    _context.Log($"Found matching resource: {nameFormatted}");
+                    _context.Log($"Invoking LoadStream with: {nameFormatted}");
+
+                    var costuraAssemblyLoaderType = loadingPluginAssembly.GetType("Costura.AssemblyLoader");
+                    var loadStreamMethod = costuraAssemblyLoaderType.GetMethod(
+                        "LoadStream",
+                        BindingFlags.NonPublic | BindingFlags.Static,
+                        null,
+                        new Type[] { typeof(string) },
+                        null
+                    );
+
+                    // Invoke LoadStream to get the assembly stream
+                    var assemblyStream = (Stream)loadStreamMethod.Invoke(null, new object[] { nameFormatted });
+
+                    if (assemblyStream == null)
+                    {
+                        _context.Log($"Failed to load stream for assembly: {nameFormatted}");
+                        return null;
+                    }
+
+                    using (var memoryStream = new MemoryStream())
+                    {
+                        assemblyStream.CopyTo(memoryStream);
+                        return Assembly.Load(memoryStream.ToArray());
+                    }
+                }
+                else
+                {
+                    _context.Log($"No matching resource found for assembly: {assemblyName}");
+                }
+            }
+            catch (TargetInvocationException tie)
+            {
+                _context.Log($"Target invocation exception: {tie.InnerException?.Message}");
+            }
+            catch (Exception ex)
+            {
+                _context.Log($"Error resolving assembly '{assemblyName}': {ex.Message}");
+            }
+
+            
+
+            var dependsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Depends");
+            var fallbackPath = Path.Combine(fallbackPath, $"{assemblyName}.dll");
+
+            if (!Directory.Exists(dependsPath)) Directory.CreateDirectory(dependsPath);
+            
+            if (File.Exists(fallbackPath))
+            {
+                return Assembly.LoadFrom(fallbackPath);
+            }
+
+            _context.Log($"Unable to resolve assembly: {assemblyName}");
+            return null;
+        }
+
 
         private void StartWatcher()
         {
