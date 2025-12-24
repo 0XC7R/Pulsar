@@ -5785,7 +5785,12 @@ namespace Pulsar.Server.Forms
         public ServerContext(FrmMain form) { _form = form; }
         public Form MainForm => _form;
         public PulsarServer Server => _form.ListenServer;
-        public void Log(string message) { _form.EventLog(message, "info"); }
+        public void Log(string message) { Log(message, false); } // use toggle method instead, this is for backwardcompatability
+
+        public void Log(string message) 
+        { 
+            _form.EventLog(message, e ? "error" : "info"); 
+        }
 
         public void ClearPluginMenuItems()
         {
