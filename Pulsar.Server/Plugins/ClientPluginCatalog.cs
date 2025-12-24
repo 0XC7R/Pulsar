@@ -205,23 +205,22 @@ namespace Pulsar.Server.Plugins
                 var resources = loadingPluginAssembly.GetManifestResourceNames();
 
                 // Log available resources
-                _context.Log($"Available resources in assembly '{loadingPluginAssembly.FullName}': {string.Join(", ", resources)}");
+                //_context.Log($"Available resources in assembly '{loadingPluginAssembly.FullName}': {string.Join(", ", resources)}");
 
                 // Find resources that match the assembly name by extracting the base name
                 var nameFormatted = resources
                     .FirstOrDefault(resource =>
                     {
-                        // Extract the base name before .g.resources or .resources
-                        // .Replace(".g.resources", "").Replace(".resources", "").
+                        
                         var baseName = resource.Replace(".dll.compressed", "").Replace("costura.", "");
-                        var eq = baseName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase);
+                        //debug var var eq = baseName.Equals(assemblyName, StringComparison.OrdinalIgnoreCase);
                         // Check if the base name matches the assembly name
                         return baseName.Equals(assemblyName.Replace(".dll.compressed", "").Replace("costura.", ""),
                             StringComparison.OrdinalIgnoreCase) || baseName == assemblyName;
                     });
 
-                // usually embeded resources like dlls (cosutra.dllname.dll.compressed) starts with costura but others like .
-                if (nameFormatted != null && nameFormatted.StartsWith("costura"))
+                // usually embeded resources like dlls (cosutra.dllname.dll.compressed) starts with costura but others like .resource or .g.resource do not
+                if (!string.IsNullOrEmpty(nameFormatted) && nameFormatted.StartsWith("costura"))
                 {
                     _context.Log($"Found matching resource: {nameFormatted}");
                     _context.Log($"Invoking LoadStream with: {nameFormatted}");
