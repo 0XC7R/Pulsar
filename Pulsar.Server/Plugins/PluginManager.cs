@@ -327,17 +327,17 @@ namespace Pulsar.Server.Plugins
             }
             catch (ReflectionTypeLoadException rtle)
             {
-                _context.Log("Plugin load error (ReflectionTypeLoadException): " + rtle.Message);
+                _context.Log("Plugin load error (ReflectionTypeLoadException): " + rtle.Message, true);
                 foreach (var e in rtle.LoaderExceptions)
-                    _context.Log("  " + e?.Message);
+                    _context.Log("  " + e?.Message, true);
             }
             catch (FileNotFoundException fnfe)
             {
-                _context.Log($"File not found: {fnfe.Message}");
+                _context.Log($"File not found: {fnfe.Message}", true);
             }
             catch (Exception ex)
             {
-                _context.Log("Plugin load error: " + ex.Message);
+                _context.Log("Plugin load error: " + ex.Message, true);
             }
             finally
             {
@@ -394,7 +394,7 @@ namespace Pulsar.Server.Plugins
 
                     if (assemblyStream == null)
                     {
-                        _context.Log($"Failed to load stream for assembly: {nameFormatted}");
+                        _context.Log($"Failed to load stream for assembly: {nameFormatted}", true);
                         return null;
                     }
 
@@ -406,16 +406,16 @@ namespace Pulsar.Server.Plugins
                 }
                 else
                 {
-                    _context.Log($"No matching resource found for assembly: {assemblyName}");
+                    _context.Log($"No matching resource found for assembly: {assemblyName}", true);
                 }
             }
             catch (TargetInvocationException tie)
             {
-                _context.Log($"Target invocation exception: {tie.InnerException?.Message}");
+                _context.Log($"Target invocation exception: {tie.InnerException?.Message}", true);
             }
             catch (Exception ex)
             {
-                _context.Log($"Error resolving assembly '{assemblyName}': {ex.Message}");
+                _context.Log($"Error resolving assembly '{assemblyName}': {ex.Message}", true);
             }
 
             var dependsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Depends");
@@ -428,7 +428,7 @@ namespace Pulsar.Server.Plugins
                 return Assembly.LoadFrom(fallbackPath);
             }
 
-            _context.Log($"Unable to resolve assembly: {assemblyName}");
+            _context.Log($"Unable to resolve assembly: {assemblyName}", true);
             return null;
         }
 
