@@ -267,7 +267,7 @@ namespace Pulsar.Server.Plugins
             
 
             var dependsPath = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location), "Depends");
-            var fallbackPath = Path.Combine(fallbackPath, $"{assemblyName}.dll");
+            var fallbackPath = Path.Combine(dependsPath, $"{assemblyName}.dll");
 
             if (!Directory.Exists(dependsPath)) Directory.CreateDirectory(dependsPath);
             
